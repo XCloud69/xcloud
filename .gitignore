@@ -1,0 +1,3 @@
+build/
+src/xcloud.egg-info/
+src/*/__pycache__/
