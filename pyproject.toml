@@ -12,7 +12,7 @@ dependencies = [
     "python-multipart",
     "faster-whisper>=1.2.0",
     "openai-whisper>=20250625",
-    "ctranslate2>=4.6.1",  # Updated to fix your error
+    "ctranslate2>=4.6.1",
     "torch>=2.9.0",
     "av>=16.0.1",
     "numpy>=2.0.0",
