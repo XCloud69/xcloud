@@ -33,7 +33,7 @@ async def set_model(name: str):
 
 
 @router.get("/chat")
-async def chat_route(prompt: str):
+async def chat(prompt: str):
     return StreamingResponse(
         llm_service.ollama_streamer(prompt),
         media_type="text/event-stream"
