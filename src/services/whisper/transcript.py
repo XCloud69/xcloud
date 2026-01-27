@@ -1,64 +1,40 @@
 import numpy as np
 from faster_whisper import WhisperModel
+import subprocess
 import time
-from configuration import device, model_path, input_file, sample_rate
-from configuration import subprocess, file
+from .configuration import device, model_path, sample_rate
 
-
-begin = time.perf_counter()
-
-print("Loading model...")
 model = WhisperModel(model_path, device=device)
-print("Model loaded.\nExtracting and transcribing audio...")
 
-process = subprocess.Popen(
-    [
-        "ffmpeg",
-        "-loglevel",
-        "quiet",
-        "-i",
-        input_file,
-        "-ar",
-        str(sample_rate),
-        "-ac",
-        "1",
-        "-f",
-        "s16le",
-        "-",
-    ],
-    stdout=subprocess.PIPE,
-)
 
-audio_bytes, _ = process.communicate()
-audio_data = np.frombuffer(audio_bytes, np.int16).astype(np.float32) / 32768.0
+async def transcribe_audio(audio_bytes: bytes):
+    begin = time.perf_counter()
 
-segments_iter, info = model.transcribe(audio_data, beam_size=1)
+    process = subprocess.Popen(
+        [
+            "ffmpeg", "-loglevel", "quiet",
+            "-i", "pipe:0",
+            "-ar", str(sample_rate),
+            "-ac", "1",
+            "-f", "s16le", "-",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+    )
 
-segments = list(segments_iter)
+    pcm_bytes, _ = process.communicate(input=audio_bytes)
+    audio_data = np.frombuffer(
+        pcm_bytes, np.int16).astype(np.float32) / 32768.0
 
-print("## Transcription")
-for segment in segments:
-    print(f"[{segment.start:.2f}s → {segment.end:.2f}s] {segment.text}")
-print("\n---")
+    segments_iter, info = model.transcribe(audio_data, beam_size=1)
 
-with open(file, "w", encoding="utf-8") as f:
-    for s in segments:
-        start_time = (
-            getattr(s, "start", None) if not isinstance(
-                s, dict) else s.get("start")
-        )
-        end_time = getattr(s, "end", None) if not isinstance(
-            s, dict) else s.get("end")
-        text = (
-            s.get("text", "") if isinstance(
-                s, dict) else getattr(s, "text", "")
-        ) or ""
-        if start_time is not None and end_time is not None:
-            f.write(f"({start_time:.2f}s → {end_time:.2f}s) {text}\n")
-        else:
-            f.write(f"{text}\n")
-    f.write("\n---")
+    full_transcript = []
+    for s in segments_iter:
+        line = f"({s.start:.2f}s → {s.end:.2f}s) {s.text}"
+        print(line)
+        full_transcript.append(line)
 
-final = time.perf_counter()
+    final = time.perf_counter()
+    print(f"Execution time: {(final - begin) / 60:.2f} minutes")
 
-print(f"Execution time: {(final - begin) / 60:.2f} minutes")
+    return "\n".join(full_transcript)
