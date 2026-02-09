@@ -20,6 +20,12 @@ dependencies = [
     "sounddevice>=0.5.2",
     "huggingface-hub>=0.35.3",
     "requests>=2.32.5",
+    "llama-index-core",
+    "llama-index-embeddings-ollama",
+    "llama-index-vector-stores-chroma",
+    "chromadb",
+    "pypdf",
+    "llama-index-llms-openai"
 ]
 
 [project.optional-dependencies]
