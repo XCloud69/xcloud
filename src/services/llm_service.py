@@ -2,7 +2,7 @@ from ollama import list as list_models
 from ollama import AsyncClient
 import os
 
-current_model = "qwen2.5:1.5b"
+current_model = "qwen2.5:7b-instruct-q4_K_M"
 
 
 def read_context_from_folder(folder_path: str):
