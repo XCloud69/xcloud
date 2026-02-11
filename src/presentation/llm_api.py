@@ -104,15 +104,34 @@ async def chat(prompt: str, use_rag: bool = False, top_k: int = 3):
     """
     Chat with LLM, optionally using RAG context.
     """
+    sources = []
+
     if use_rag:
-        # Get RAG context and inject it
+        if rag_service.current_index is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No RAG index loaded. Please load or create a collection first."
+            )
+
         try:
-            rag_context = rag_service.get_context_for_llm(prompt, top_k)
+            rag_context, sources = rag_service.get_context_for_llm(
+                prompt, top_k)
             llm_service.extra_context = rag_context
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"RAG error: {str(e)}")
 
+    # Stream response with sources metadata first
+    async def stream_with_metadata():
+        import json
+        # Send sources as first event
+        if sources:
+            yield f"data: {json.dumps({'type': 'sources', 'data': sources})}\n\n"
+
+        # Then stream LLM response
+        async for chunk in llm_service.ollama_streamer(prompt):
+            yield chunk
+
     return StreamingResponse(
-        llm_service.ollama_streamer(prompt),
+        stream_with_metadata(),
         media_type="text/event-stream"
     )
