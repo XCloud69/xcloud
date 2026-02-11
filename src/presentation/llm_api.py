@@ -44,61 +44,6 @@ async def set_model(name: str):
     return {"message": f"Active model set to {llm_service.current_model}"}
 
 
-@router.post("/rag/index")
-async def index_folder(folder_path: str, collection_name: str = "default"):
-    """
-    Index a folder for RAG retrieval.
-    Creates embeddings and stores them in ChromaDB.
-    """
-    try:
-        result = rag_service.create_index_from_folder(
-            folder_path, collection_name)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/rag/load")
-async def load_collection(collection_name: str):
-    """
-    Load an existing RAG collection.
-    """
-    try:
-        result = rag_service.load_existing_index(collection_name)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-@router.get("/rag/query")
-async def rag_query(question: str, top_k: int = 5):
-    """
-    Query the RAG system directly.
-    Returns answer with sources.
-    """
-    try:
-        result = rag_service.query_rag(question, top_k)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/rag/collections")
-async def list_rag_collections():
-    """
-    List all available RAG collections.
-    """
-    return rag_service.list_collections()
-
-
-@router.get("/rag/status")
-async def rag_status():
-    """
-    Get current RAG collection status.
-    """
-    return rag_service.get_current_collection_info()
-
-
 @router.get("/chat")
 async def chat(prompt: str, use_rag: bool = False, top_k: int = 3):
     """
