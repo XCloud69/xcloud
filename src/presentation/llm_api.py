@@ -1,6 +1,6 @@
 from fastapi import UploadFile, File, APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from services import llm_service, whisper, rag_service
+from services import llm_service, whisper, rag_service, search_service
 import os
 
 router = APIRouter()
@@ -53,34 +53,72 @@ async def clear_conversation():
 
 
 @router.get("/chat")
-async def chat(prompt: str, use_rag: bool = False, top_k: int = 3):
+async def chat(prompt: str, use_rag: bool = False,
+               use_web_search: bool = False, top_k: int = 3,
+               search_results: int = 5,):
     """
-    Chat with LLM, optionally using RAG context.
+    Chat with LLM, optionally using RAG context and/or web search.
+
+    - use_rag: enrich prompt with local document context from ChromaDB
+    - use_web_search: search the web and inject results as context
     """
     sources = []
+    context_parts = []
 
+    # 1. RAG context
     if use_rag:
         if rag_service.current_index is None:
             raise HTTPException(
                 status_code=400,
-                detail="No RAG index loaded. Please load or create a collection first."
+                detail="""No RAG index loaded.
+                Please load or create a collection first."""
             )
-
         try:
-            rag_context, sources = rag_service.get_context_for_llm(
+            rag_context, rag_sources = rag_service.get_context_for_llm(
                 prompt, top_k)
-            llm_service.session.extra_context = rag_context
+            context_parts.append(f"=== Document Context ===\n{rag_context}")
+            sources.extend([{**s, "type": "rag"} for s in rag_sources])
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"RAG error: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"RAG error: {str(e)}")
+
+    # 2. Web search context
+    if use_web_search:
+        try:
+            search_context = search_service.format_search_results_as_context(
+                prompt, max_results=search_results
+            )
+            context_parts.append(
+                f"=== Web Search Results ===\n{search_context}")
+
+            # Add web sources to the sources list
+            web_results = search_service.web_search(
+                prompt, max_results=search_results)
+            for i, result in enumerate(web_results, 1):
+                if "error" not in result:
+                    sources.append({
+                        "id": f"web-{i}",
+                        "type": "web",
+                        "title": result.get("title", ""),
+                        "url": result.get("href", ""),
+                        "text": result.get("body", "")[:200] + "...",
+                    })
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Web search error: {str(e)}")
+
+    # Combine all context
+    llm_service.extra_context = "\n\n".join(context_parts)
 
     # Stream response with sources metadata first
     async def stream_with_metadata():
         import json
         # Send sources as first event
         if sources:
-            yield f"data: {json.dumps({'type': 'sources', 'data': sources})}\n\n"
+            yield f"data: {json.dumps({'type': 'sources',
+                                       'data': sources})}\n\n"
 
-        # Then stream LLM response — call on the INSTANCE
+        # Then stream LLM response
         async for chunk in llm_service.session.stream(prompt):
             yield chunk
 

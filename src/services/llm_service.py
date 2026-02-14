@@ -3,12 +3,14 @@ from ollama import AsyncClient
 import os
 from dataclasses import dataclass, field
 
-SYSTEM_PROMPT = (
-    "You are a helpful local assistant. "
-    "Use the following context to answer questions accurately. "
-    "If the context doesn't contain relevant information, say so. "
-    "If you don't know the answer, say so."
-)
+SYSTEM_PROMPT = """You are a helpful assistant.
+    You will be given context from various sources
+    (documents, web search results, etc.).
+    Use the provided context to answer the user's question accurately.
+    If the context contains web search results, cite the sources when possible.
+    If you still don't know the answer even with the provided context,
+    say so honestly.
+    """
 
 
 def read_context_from_folder(folder_path: str):
