@@ -25,7 +25,8 @@ dependencies = [
     "llama-index-vector-stores-chroma",
     "chromadb",
     "pypdf",
-    "llama-index-llms-openai"
+    "llama-index-llms-openai",
+    "ddgs"
 ]
 
 [project.optional-dependencies]
