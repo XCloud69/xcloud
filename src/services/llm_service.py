@@ -1,8 +1,7 @@
 from ollama import list as list_models
 from ollama import AsyncClient
 import os
-
-current_model = "qwen2.5:7b-instruct-q4_K_M"
+from dataclasses import dataclass, field
 
 
 def read_context_from_folder(folder_path: str):
@@ -22,14 +21,20 @@ def get_available_models():
         return {"error": str(e)}
 
 
-extra_context = ""
+@dataclass
+class LLMSession:
+    model: str = "qwen2.5:7b-instruct-q4_K_M"
+    extra_context: str = ""
+    conversation_history: list = field(default_factory=list)
 
-
-async def ollama_streamer(prompt: str):
-    full_prompt = f"Context: {extra_context}\n\nUser Question: {prompt}"
-    async for part in await AsyncClient().chat(
-        model=current_model,
-        messages=[{'role': 'user', 'content': full_prompt}],
-        stream=True,
-    ):
-        yield part['message']['content']
+    async def stream(self, prompt: str):
+        full_prompt = f"Context: {
+            self.extra_context}\n\nUser Question: {prompt}"
+        self.conversation_history.append(
+            {"role": "user", "content": full_prompt})
+        async for part in await AsyncClient().chat(
+            model=self.model,
+            messages=self.conversation_history,
+            stream=True,
+        ):
+            yield part['message']['content']
