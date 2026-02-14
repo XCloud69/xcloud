@@ -61,3 +61,6 @@ class LLMSession:
         self.conversation_history.append({"role": "user", "content": prompt})
         self.conversation_history.append(
             {"role": "assistant", "content": assistant_reply})
+
+
+session = LLMSession()

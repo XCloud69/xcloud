@@ -20,7 +20,7 @@ async def set_context(file: UploadFile = File(...)):
                 status_code=500, detail=f"Transcription failed: {str(e)}")
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type")
-    llm_service.extra_context = text_context
+    llm_service.session.extra_context = text_context
     return {"status": "Context loaded"}
 
 
@@ -28,9 +28,10 @@ async def set_context(file: UploadFile = File(...)):
 async def set_folder_context(path: str):
     """Legacy endpoint - simple text concatenation"""
     if os.path.exists(path):
-        llm_service.extra_context = llm_service.read_context_from_folder(path)
+        llm_service.session.extra_context = llm_service.read_context_from_folder(
+            path)
         return {"status": f"Context loaded from {path}"}
-    return {"error": "path does not exist"}, 400
+    raise HTTPException(status_code=400, detail="Path does not exist")
 
 
 @router.get("/models")
@@ -40,8 +41,15 @@ async def list_models():
 
 @router.post("/models")
 async def set_model(name: str):
-    llm_service.current_model = name
-    return {"message": f"Active model set to {llm_service.current_model}"}
+    llm_service.session.model = name
+    return {"message": f"Active model set to {llm_service.session.model}"}
+
+
+@router.post("/clear")
+async def clear_conversation():
+    """Reset the conversation history."""
+    llm_service.session.clear_history()
+    return {"status": "Conversation history cleared"}
 
 
 @router.get("/chat")
@@ -61,7 +69,7 @@ async def chat(prompt: str, use_rag: bool = False, top_k: int = 3):
         try:
             rag_context, sources = rag_service.get_context_for_llm(
                 prompt, top_k)
-            llm_service.extra_context = rag_context
+            llm_service.session.extra_context = rag_context
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"RAG error: {str(e)}")
 
@@ -72,8 +80,8 @@ async def chat(prompt: str, use_rag: bool = False, top_k: int = 3):
         if sources:
             yield f"data: {json.dumps({'type': 'sources', 'data': sources})}\n\n"
 
-        # Then stream LLM response
-        async for chunk in llm_service.ollama_streamer(prompt):
+        # Then stream LLM response — call on the INSTANCE
+        async for chunk in llm_service.session.stream(prompt):
             yield chunk
 
     return StreamingResponse(
