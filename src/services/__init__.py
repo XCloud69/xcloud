@@ -2,3 +2,8 @@ from . import llm_service
 from . import whisper
 from . import rag_service
 from . import search_service
+from . import auth_service
+from . import chat_service
+from . import task_service
+from . import reminder_service
+from . import notification_service

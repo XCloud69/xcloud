@@ -1,15 +1,59 @@
-from fastapi import UploadFile, File, APIRouter, HTTPException
+from fastapi import UploadFile, File, APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
 from services import llm_service, whisper, rag_service, search_service
+from services import chat_service, auth_service
+from Data.models import User, Chat as ChatModel
+from Data.database import get_db
 import os
+import json
 
 router = APIRouter()
 
 
+# ---------------------------------------------------------------------------
+# Unauthenticated utility endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/models")
+async def list_models():
+    """List available Ollama models."""
+    return llm_service.get_available_models()
+
+
+@router.get("/default-model")
+async def default_model():
+    """Return the current default model (from settings.json)."""
+    model = llm_service.get_default_model()
+    return {"default_model": model}
+
+
+@router.get("/settings")
+async def get_settings():
+    """Return full settings (including default_model)."""
+    return llm_service.get_settings()
+
+
+@router.get("/prompts")
+async def suggested_prompts(category: str = None):
+    """Get suggested prompts for the user."""
+    return llm_service.get_suggested_prompts(category)
+
+
+# ---------------------------------------------------------------------------
+# Context endpoints (authenticated)
+# ---------------------------------------------------------------------------
+
+
 @router.post("/set_context")
-async def set_context(file: UploadFile = File(...)):
+async def set_context(
+    file: UploadFile = File(...),
+    user: User = Depends(auth_service.get_current_user),
+):
     content = await file.read()
-    mime_type = file.content_type
+    mime_type = file.content_type or ""
     if mime_type.startswith("text/"):
         text_context = content.decode("utf-8")
     elif mime_type.startswith("audio/"):
@@ -17,7 +61,8 @@ async def set_context(file: UploadFile = File(...)):
             text_context = await whisper.transcript.transcribe_audio(content)
         except Exception as e:
             raise HTTPException(
-                status_code=500, detail=f"Transcription failed: {str(e)}")
+                status_code=500, detail=f"Transcription failed: {str(e)}"
+            )
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type")
     llm_service.session.extra_context = text_context
@@ -25,43 +70,171 @@ async def set_context(file: UploadFile = File(...)):
 
 
 @router.post("/set_context_folder")
-async def set_folder_context(path: str):
+async def set_folder_context(
+    path: str,
+    user: User = Depends(auth_service.get_current_user),
+):
     """Legacy endpoint - simple text concatenation"""
     if os.path.exists(path):
-        llm_service.session.extra_context = llm_service.read_context_from_folder(
-            path)
+        llm_service.session.extra_context = llm_service.read_context_from_folder(path)
         return {"status": f"Context loaded from {path}"}
     raise HTTPException(status_code=400, detail="Path does not exist")
 
 
-@router.get("/models")
-async def list_models():
-    return llm_service.get_available_models()
-
-
 @router.post("/models")
-async def set_model(name: str):
-    llm_service.session.model = name
-    return {"message": f"Active model set to {llm_service.session.model}"}
+async def set_model(
+    name: str,
+    user: User = Depends(auth_service.get_current_user),
+):
+    """Set the default model. Use 'auto' to reset to auto-detection."""
+    if name != "auto":
+        available = llm_service.get_available_models()
+        if isinstance(available, dict) and "error" in available:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Cannot reach Ollama: {available['error']}. Make sure Ollama is running.",
+            )
+        if name not in available:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{name}' is not installed. Available models: {available}",
+            )
+    llm_service.save_default_model(name)
+    resolved = llm_service.get_default_model()
+    llm_service.session.model = resolved or ""
+    return {
+        "message": f"Default model set to '{name}'",
+        "resolved_model": resolved,
+    }
 
 
-@router.post("/clear")
-async def clear_conversation():
-    """Reset the conversation history."""
-    llm_service.session.clear_history()
-    return {"status": "Conversation history cleared"}
+# ---------------------------------------------------------------------------
+# Chat management endpoints (authenticated)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/chats")
+async def create_chat(
+    title: str = "New Chat",
+    model: str | None = None,
+    user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new chat session. Model defaults to settings.json value if omitted."""
+    return chat_service.create_chat(db, user.id, title, model)
+
+
+@router.get("/chats")
+async def list_chats(
+    user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all chats for the current user."""
+    return chat_service.list_chats(db, user.id)
+
+
+@router.get("/chats/{chat_id}")
+async def get_chat(
+    chat_id: str,
+    user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get a chat with all its messages."""
+    chat = chat_service.get_chat(db, chat_id, user.id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+
+@router.delete("/chats/{chat_id}")
+async def delete_chat(
+    chat_id: str,
+    user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a chat."""
+    if not chat_service.delete_chat(db, chat_id, user.id):
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"status": "Chat deleted"}
+
+
+@router.patch("/chats/{chat_id}")
+async def rename_chat(
+    chat_id: str,
+    title: str = Query(...),
+    user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Rename a chat."""
+    chat = chat_service.rename_chat(db, chat_id, user.id, title)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+
+@router.get("/chats/search/")
+async def search_chats(
+    q: str = Query(..., min_length=1),
+    user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Search through chat messages."""
+    return chat_service.search_chats(db, user.id, q)
+
+
+@router.post("/chats/{chat_id}/export")
+async def export_chat(
+    chat_id: str,
+    fmt: str = Query("json", pattern="^(json|md|txt)$"),
+    user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Export a chat to a file. Formats: json, md, txt."""
+    filepath = chat_service.export_chat(db, chat_id, user.id, fmt)
+    if not filepath:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"status": "Exported", "path": filepath}
+
+
+# ---------------------------------------------------------------------------
+# Chat / LLM streaming endpoint (authenticated)
+# ---------------------------------------------------------------------------
 
 
 @router.get("/chat")
-async def chat(prompt: str, use_rag: bool = False,
-               use_web_search: bool = False, top_k: int = 3,
-               search_results: int = 5,):
+async def chat(
+    prompt: str,
+    chat_id: str = None,
+    use_rag: bool = False,
+    use_web_search: bool = False,
+    think: bool = False,
+    top_k: int = 3,
+    search_results: int = 5,
+    user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
     """
     Chat with LLM, optionally using RAG context and/or web search.
 
-    - use_rag: enrich prompt with local document context from ChromaDB
-    - use_web_search: search the web and inject results as context
+    - chat_id: If provided, continues an existing chat. Otherwise creates a new one.
+    - use_rag: Enrich prompt with local document context from ChromaDB.
+    - use_web_search: Search the web and inject results as context.
+    - think: Enable extended thinking (model must support it).
     """
+
+    # Resolve or create chat
+    if chat_id:
+        existing = chat_service.get_chat(db, chat_id, user.id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Chat not found")
+    else:
+        new_chat = chat_service.create_chat(db, user.id)
+        chat_id = new_chat["id"]
+
+    # Get the chat's model
+    chat_record = db.query(ChatModel).filter(ChatModel.id == chat_id).first()
+    model = chat_record.model if chat_record else llm_service.session.model
+
     sources = []
     context_parts = []
 
@@ -70,17 +243,14 @@ async def chat(prompt: str, use_rag: bool = False,
         if rag_service.current_index is None:
             raise HTTPException(
                 status_code=400,
-                detail="""No RAG index loaded.
-                Please load or create a collection first."""
+                detail="No RAG index loaded. Please load or create a collection first.",
             )
         try:
-            rag_context, rag_sources = rag_service.get_context_for_llm(
-                prompt, top_k)
+            rag_context, rag_sources = rag_service.get_context_for_llm(prompt, top_k)
             context_parts.append(f"=== Document Context ===\n{rag_context}")
             sources.extend([{**s, "type": "rag"} for s in rag_sources])
         except Exception as e:
-            raise HTTPException(
-                status_code=500, detail=f"RAG error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"RAG error: {str(e)}")
 
     # 2. Web search context
     if use_web_search:
@@ -88,41 +258,77 @@ async def chat(prompt: str, use_rag: bool = False,
             search_context = search_service.format_search_results_as_context(
                 prompt, max_results=search_results
             )
-            context_parts.append(
-                f"=== Web Search Results ===\n{search_context}")
-
-            # Add web sources to the sources list
-            web_results = search_service.web_search(
-                prompt, max_results=search_results)
+            context_parts.append(f"=== Web Search Results ===\n{search_context}")
+            web_results = search_service.web_search(prompt, max_results=search_results)
             for i, result in enumerate(web_results, 1):
                 if "error" not in result:
-                    sources.append({
-                        "id": f"web-{i}",
-                        "type": "web",
-                        "title": result.get("title", ""),
-                        "url": result.get("href", ""),
-                        "text": result.get("body", "")[:200] + "...",
-                    })
+                    sources.append(
+                        {
+                            "id": f"web-{i}",
+                            "type": "web",
+                            "title": result.get("title", ""),
+                            "url": result.get("href", ""),
+                            "text": result.get("body", "")[:200] + "...",
+                        }
+                    )
         except Exception as e:
-            raise HTTPException(
-                status_code=500, detail=f"Web search error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Web search error: {str(e)}")
 
-    # Combine all context
-    llm_service.extra_context = "\n\n".join(context_parts)
+    # Build a per-request LLM session with chat history from DB
+    llm_session = llm_service.LLMSession(model=model)
 
-    # Stream response with sources metadata first
+    # Load conversation history from database
+    db_messages = chat_service.get_chat_messages(db, chat_id)
+    llm_session.conversation_history = [
+        {"role": m["role"], "content": m["content"]}
+        for m in db_messages
+        if m["role"] in ("user", "assistant")
+    ]
+
+    # Set context (FIXED: set on the session instance, not module)
+    if context_parts:
+        llm_session.extra_context = "\n\n".join(context_parts)
+
+    # Save user message to DB
+    chat_service.add_message(db, chat_id, "user", prompt)
+
+    # Stream response
     async def stream_with_metadata():
-        import json
+        # Send chat_id so the client knows which chat this belongs to
+        yield json.dumps({"type": "chat_id", "data": chat_id}) + "\n"
+
         # Send sources as first event
         if sources:
-            yield f"data: {json.dumps({'type': 'sources',
-                                       'data': sources})}\n\n"
+            yield json.dumps({"type": "sources", "data": sources}) + "\n"
 
-        # Then stream LLM response
-        async for chunk in llm_service.session.stream(prompt):
-            yield chunk
+        # Stream LLM response, collecting full reply and thinking
+        full_reply = ""
+        full_thinking = ""
 
-    return StreamingResponse(
-        stream_with_metadata(),
-        media_type="text/event-stream"
-    )
+        async for chunk_json in llm_session.stream(prompt, think=think):
+            parsed = json.loads(chunk_json)
+            if parsed["type"] == "content":
+                full_reply += parsed["content"]
+            elif parsed["type"] == "thinking":
+                full_thinking += parsed["content"]
+            elif parsed["type"] == "done":
+                # Save assistant message to DB with thinking
+                chat_service.add_message(
+                    db,
+                    chat_id,
+                    "assistant",
+                    full_reply,
+                    thinking=full_thinking if full_thinking else None,
+                )
+            yield chunk_json
+
+    return StreamingResponse(stream_with_metadata(), media_type="text/event-stream")
+
+
+@router.post("/clear")
+async def clear_conversation(
+    user: User = Depends(auth_service.get_current_user),
+):
+    """Reset the global conversation history (legacy)."""
+    llm_service.session.clear_history()
+    return {"status": "Conversation history cleared"}
