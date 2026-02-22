@@ -26,7 +26,11 @@ dependencies = [
     "chromadb",
     "pypdf",
     "llama-index-llms-openai",
-    "ddgs"
+    "ddgs",
+    "sqlalchemy",
+    "aiosqlite",
+    "pyjwt",
+    "bcrypt"
 ]
 
 [project.optional-dependencies]
