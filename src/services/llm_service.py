@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 # ---- Settings persistence ------------------------------------------------- #
 
 SETTINGS_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "settings.json")
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "settings.json")
 )
 
 
@@ -53,6 +53,46 @@ def get_default_model() -> str | None:
     models = get_available_models()
     if isinstance(models, list) and models:
         return models[0]
+        
+    # If no models are available, download one based on VRAM size
+    import subprocess
+    import platform
+    vram_gb = 0.0
+    try:
+        if platform.system() in ["Linux", "Windows"]:
+            output = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                stderr=subprocess.DEVNULL, text=True
+            )
+            vram_gb = int(output.strip().split('\n')[0]) / 1024.0
+    except Exception:
+        pass
+        
+    if vram_gb >= 16:
+        target_model = "qwen3:8b"
+    elif vram_gb >= 8:
+        target_model = "qwen3:8b"
+    elif vram_gb > 0:
+        target_model = "qwen3:1.7b"
+    else:
+        target_model = "qwen3:1.7b" # Fast/light for CPU or unknown VRAM
+        
+    print(f"No LLM found. VRAM detected: {vram_gb:.1f}GB. Pulling {target_model} via Ollama...")
+    try:
+        from ollama import pull
+        pull(target_model)
+        print(f"Successfully pulled {target_model}")
+        
+        # Also ensure index model exists
+        index_model = "nomic-embed-text:latest"
+        print(f"Checking for indexing model {index_model}...")
+        pull(index_model)
+        print(f"Successfully ensured {index_model} is available.")
+        
+        return target_model
+    except Exception as e:
+        print(f"Failed to pull models: {e}")
+
     return None
 
 

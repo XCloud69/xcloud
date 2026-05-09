@@ -3,11 +3,10 @@ import subprocess
 from os import makedirs, path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from json import load
+from .path_config import load_path_config
 
 # === CONFIGURATION ===
-with open("path.json", "r") as f:
-    config_data = load(f)
+config_data = load_path_config()
 WATCH_DIR = config_data["WATCH_DIR"]
 TRANSCRIPT_SCRIPT = config_data["TRANSCRIPT_SCRIPT"]
 PYTHON_EXEC = config_data["PYTHON_EXEC"]
@@ -24,7 +23,7 @@ class WatchHandler(FileSystemEventHandler):
         sleep(2)
         try:
             print(f"Starting transcription for {path.basename(filepath)}...")
-            _ = subprocess.run([PYTHON_EXEC, TRANSCRIPT_SCRIPT, filepath], check=True)
+            _ = subprocess.run([PYTHON_EXEC, "-m", TRANSCRIPT_SCRIPT, filepath], check=True)
             print(f"Done: {path.basename(filepath)}\n")
         except subprocess.CalledProcessError as e:
             print(f"Transcription failed for {filepath}: {e}")
