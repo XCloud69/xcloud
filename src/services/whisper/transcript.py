@@ -1,8 +1,9 @@
+import sys
 import numpy as np
 from faster_whisper import WhisperModel
 import subprocess
 import time
-from .configuration import device, model_path, sample_rate
+from .configuration import device, model_path, sample_rate, save_path
 
 model = WhisperModel(model_path, device=device)
 
@@ -38,3 +39,23 @@ async def transcribe_audio(audio_bytes: bytes):
     print(f"Execution time: {(final - begin) / 60:.2f} minutes")
 
     return "\n".join(full_transcript)
+
+
+if __name__ == "__main__":
+    import os
+
+    if len(sys.argv) < 2:
+        print("Usage: python -m services.whisper.transcript <audio_file>")
+        sys.exit(1)
+
+    filepath = sys.argv[1]
+    with open(filepath, "rb") as f:
+        audio_bytes = f.read()
+
+    import asyncio
+    transcript = asyncio.run(transcribe_audio(audio_bytes))
+
+    out_file = os.path.join(save_path, os.path.splitext(os.path.basename(filepath))[0] + ".txt")
+    with open(out_file, "w") as f:
+        f.write(transcript)
+    print(f"Saved: {out_file}")

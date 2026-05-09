@@ -1,7 +1,6 @@
 import subprocess
 import platform
-from json import load
-
+from .path_config import load_path_config
 
 def detect_device():
     system = platform.system()
@@ -63,8 +62,7 @@ def detect_device():
 
 
 # ====== Configuration ======
-with open("path.json", "r") as f:
-    config_data = load(f)
+config_data = load_path_config()
 model_path = config_data["whisper_model"]
 device = detect_device()
 sample_rate = 16000
