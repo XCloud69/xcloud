@@ -85,8 +85,7 @@ def load_existing_index(collection_name: str = "default"):
         current_collection_name = collection_name
         return {"status": "success", "collection": collection_name}
     except Exception as e:
-        raise ValueError(f"Failed to load collection '{
-                         collection_name}': {str(e)}")
+        raise ValueError(f"Failed to load collection '{collection_name}': {str(e)}")
 
 
 def get_context_for_llm(question: str, top_k: int = 3):
