@@ -10,6 +10,7 @@ from .auth_api import router as auth_router
 from .task_api import router as task_router
 from .reminder_api import router as reminder_router
 from .notification_api import router as notification_router
+from .files_api import router as files_router
 from Data.database import init_db
 from services.reminder_service import check_and_fire_due_reminders
 
@@ -52,3 +53,4 @@ app.include_router(rag_router, prefix="/rag", tags=["RAG"])
 app.include_router(task_router, prefix="/tasks", tags=["Tasks"])
 app.include_router(reminder_router, prefix="/reminders", tags=["Reminders"])
 app.include_router(notification_router, prefix="/notifications", tags=["Notifications"])
+app.include_router(files_router, prefix="/files", tags=["Files"])
