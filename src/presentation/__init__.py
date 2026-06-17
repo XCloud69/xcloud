@@ -13,6 +13,8 @@ from .notification_api import router as notification_router
 from .files_api import router as files_router
 from .meetings_api import router as meetings_router
 from Data.database import init_db
+from services.dir_config import ensure_xcloud_dirs
+from services.recording_watcher import start_recording_watcher
 from services.reminder_service import check_and_fire_due_reminders
 
 
@@ -28,13 +30,18 @@ async def _reminder_background_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create DB tables
+    # Startup: create DB tables and Xcloud user dirs
     init_db()
+    ensure_xcloud_dirs()
+    # Start recording watcher background thread
+    recording_observer = start_recording_watcher()
     # Start background reminder checker
     task = asyncio.create_task(_reminder_background_loop())
     yield
-    # Shutdown: cancel background task
+    # Shutdown: cancel background task and stop watcher
     task.cancel()
+    recording_observer.stop()
+    recording_observer.join()
 
 
 app = FastAPI(title="Xcloud", version="0.3.0", lifespan=lifespan)

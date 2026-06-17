@@ -284,5 +284,30 @@ class LLMSession:
         )
 
 
+SUMMARIZE_SYSTEM_PROMPT = """You are a meeting summarizer. Summarize the following meeting transcript concisely.
+Extract key points, decisions, action items, and important discussions.
+Format the summary with clear sections."""
+
+
+async def summarize_text(text: str) -> str:
+    """Send transcript text to the LLM and return a plain-text summary."""
+    model = get_default_model() or ""
+    if not model:
+        return "No LLM model available for summarization."
+    messages = [
+        {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT},
+        {"role": "user", "content": f"Summarize this meeting transcript:\n\n{text}"},
+    ]
+    result = ""
+    async for part in await AsyncClient().chat(
+        model=model,
+        messages=messages,
+        stream=True,
+    ):
+        chunk = part["message"]["content"]
+        result += chunk
+    return result
+
+
 # Global session for backwards compat (used by non-authed endpoints)
 session = LLMSession(model=get_default_model() or "")
