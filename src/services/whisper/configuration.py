@@ -1,6 +1,7 @@
+import os
 import subprocess
 import platform
-from .path_config import load_path_config
+from .path_config import load_path_config, PROJECT_ROOT
 
 def detect_device():
     system = platform.system()
@@ -63,7 +64,7 @@ def detect_device():
 
 # ====== Configuration ======
 config_data = load_path_config()
-model_path = config_data["whisper_model"]
+model_path = os.path.join(PROJECT_ROOT, config_data["whisper_model"])
 device = detect_device()
 sample_rate = 16000
 save_path = config_data["save_path"]
