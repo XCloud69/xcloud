@@ -159,7 +159,7 @@ def export_chat(
 ) -> str | None:
     """
     Export a chat to a file. Returns the file path on success.
-    Supported formats: json, txt, md
+    Supported formats: json, md
     """
     chat = get_chat(db, chat_id, user_id)
     if not chat:
@@ -201,18 +201,6 @@ def export_chat(
                     )
                 f.write(f"{m['content']}\n\n---\n\n")
 
-    elif fmt == "txt":
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(f"Chat: {chat['title']}\n")
-            f.write(f"Model: {chat['model']}\n")
-            f.write("=" * 60 + "\n\n")
-            for m in messages:
-                role_label = "User" if m["role"] == "user" else "Assistant"
-                f.write(f"[{role_label}]\n")
-                if m.get("thinking"):
-                    f.write(f"[Thinking]: {m['thinking']}\n\n")
-                f.write(f"{m['content']}\n\n")
-                f.write("-" * 40 + "\n\n")
     else:
         return None
 

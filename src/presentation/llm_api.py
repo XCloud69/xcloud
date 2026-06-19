@@ -185,11 +185,11 @@ async def search_chats(
 @router.post("/chats/{chat_id}/export")
 async def export_chat(
     chat_id: str,
-    fmt: str = Query("json", pattern="^(json|md|txt)$"),
+    fmt: str = Query("json", pattern="^(json|md)$"),
     user: User = Depends(auth_service.get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Export a chat to a file. Formats: json, md, txt."""
+    """Export a chat to a file. Formats: json, md."""
     filepath = chat_service.export_chat(db, chat_id, user.id, fmt)
     if not filepath:
         raise HTTPException(status_code=404, detail="Chat not found")

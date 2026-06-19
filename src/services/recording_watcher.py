@@ -26,7 +26,7 @@ class RecordingHandler(FileSystemEventHandler):
     async def _process(self, filepath):
         basename = os.path.splitext(os.path.basename(filepath))[0]
 
-        transcript_path = os.path.join(get_transcriptions_dir(), f"{basename}.txt")
+        transcript_path = os.path.join(get_transcriptions_dir(), f"{basename}.md")
         if os.path.exists(transcript_path):
             return
 
@@ -44,7 +44,7 @@ class RecordingHandler(FileSystemEventHandler):
         summary = await summarize_text(transcript)
 
         os.makedirs(get_summarization_dir(), exist_ok=True)
-        summary_path = os.path.join(get_summarization_dir(), f"{basename}_summary.txt")
+        summary_path = os.path.join(get_summarization_dir(), f"{basename}_summary.md")
         with open(summary_path, "w") as f:
             f.write(summary)
         print(f"[recording-watcher] Summary saved: {summary_path}")

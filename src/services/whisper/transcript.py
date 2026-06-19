@@ -55,7 +55,7 @@ if __name__ == "__main__":
     import asyncio
     transcript = asyncio.run(transcribe_audio(audio_bytes))
 
-    out_file = os.path.join(save_path, os.path.splitext(os.path.basename(filepath))[0] + ".txt")
+    out_file = os.path.join(save_path, os.path.splitext(os.path.basename(filepath))[0] + ".md")
     with open(out_file, "w") as f:
         f.write(transcript)
     print(f"Saved: {out_file}")
