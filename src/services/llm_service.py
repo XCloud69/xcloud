@@ -49,8 +49,8 @@ def get_default_model() -> str | None:
     if model_pref and model_pref != "auto":
         return model_pref
 
-    # Auto-detect: pick the first available Ollama model
-    models = get_available_models()
+    # Auto-detect: pick the first available Ollama LLM model
+    models = get_available_llm_models()
     if isinstance(models, list) and models:
         return models[0]
         
@@ -176,12 +176,27 @@ def read_context_from_folder(folder_path: str):
     return combined_text
 
 
+def _is_embedding_model(model_name: str) -> bool:
+    """Check if a model name looks like an embedding-only model."""
+    embedding_keywords = ["embed", "nomic-embed-text", "all-minilm", "mxbai-embed"]
+    name_lower = model_name.lower()
+    return any(kw in name_lower for kw in embedding_keywords)
+
+
 def get_available_models():
     try:
         response = list_models()
         return [m.model for m in response.models]
     except Exception as e:
         return {"error": str(e)}
+
+
+def get_available_llm_models():
+    """Return only LLM models (filtering out embedding models)."""
+    models = get_available_models()
+    if isinstance(models, list):
+        return [m for m in models if not _is_embedding_model(m)]
+    return models
 
 
 def get_suggested_prompts(category: str = None) -> list:
