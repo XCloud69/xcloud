@@ -30,9 +30,15 @@ dependencies = [
     "sqlalchemy",
     "aiosqlite",
     "pyjwt",
-    "bcrypt"
+    "bcrypt",
+    "pytest",
+    "httpx",
+    "watchdog",
+    "nvidia-cudnn-cu12",
+    "nvidia-cublas-cu12"
 ]
 
+  
 [project.optional-dependencies]
 dev = [
     "pyinstaller>=6.16.0",
