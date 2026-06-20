@@ -49,8 +49,13 @@ class User(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     username = Column(String(100), unique=True, nullable=False, index=True)
-    password_hash = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=utcnow)
+
+    google_id = Column(String(255), unique=True, nullable=True, index=True)
+    email = Column(String(255), nullable=True)
+    avatar_url = Column(String(512), nullable=True)
+    google_refresh_token = Column(Text, nullable=True)
 
     chats = relationship("Chat", back_populates="user",
                          cascade="all, delete-orphan")
@@ -60,6 +65,10 @@ class User(Base):
         "Reminder", back_populates="user", cascade="all, delete-orphan")
     notifications = relationship(
         "Notification", back_populates="user", cascade="all, delete-orphan")
+    email_accounts = relationship(
+        "EmailAccount", back_populates="user", cascade="all, delete-orphan")
+    emails = relationship(
+        "Email", back_populates="user", cascade="all, delete-orphan")
 
 
 class Chat(Base):
@@ -155,3 +164,46 @@ class Notification(Base):
     created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="notifications")
+
+
+class EmailAccount(Base):
+    __tablename__ = "email_accounts"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    provider = Column(String(20), nullable=False, default="smtp")
+    email_address = Column(String(255), nullable=False)
+    smtp_server = Column(String(255), nullable=True)
+    smtp_port = Column(Integer, nullable=True, default=587)
+    smtp_username = Column(String(255), nullable=True)
+    smtp_password = Column(Text, nullable=True)
+    imap_server = Column(String(255), nullable=True)
+    imap_port = Column(Integer, nullable=True, default=993)
+    imap_username = Column(String(255), nullable=True)
+    imap_password = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    user = relationship("User", back_populates="email_accounts")
+    emails = relationship(
+        "Email", back_populates="account", cascade="all, delete-orphan"
+    )
+
+
+class Email(Base):
+    __tablename__ = "emails"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    account_id = Column(String, ForeignKey("email_accounts.id"), nullable=False, index=True)
+    message_id = Column(String(255), nullable=True, index=True)
+    sender = Column(String(255), nullable=True)
+    recipients = Column(Text, nullable=True)
+    subject = Column(String(255), nullable=True)
+    body = Column(Text, nullable=True)
+    is_read = Column(Boolean, default=False)
+    folder = Column(String(50), default="inbox")
+    received_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    user = relationship("User", back_populates="emails")
+    account = relationship("EmailAccount", back_populates="emails")
