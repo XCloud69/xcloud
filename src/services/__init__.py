@@ -7,3 +7,5 @@ from . import chat_service
 from . import task_service
 from . import reminder_service
 from . import notification_service
+from . import google_auth_service
+from . import gmail_service

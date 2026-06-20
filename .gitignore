@@ -9,3 +9,4 @@ settings.json
 xcloud.db
 exports/
 __pycache__/
+/credentials.json
