@@ -72,7 +72,8 @@ def get_google_auth_url() -> dict:
     state = secrets.token_urlsafe(32)
     auth_url, _ = flow.authorization_url(
         access_type="offline",
-        prompt="consent",
+        prompt="select_account consent",
+        include_granted_scopes="true",
         state=state,
     )
     _verifier_store[state] = flow.code_verifier

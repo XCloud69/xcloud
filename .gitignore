@@ -10,3 +10,4 @@ xcloud.db
 exports/
 __pycache__/
 /credentials.json
+uv.lock

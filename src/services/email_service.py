@@ -9,6 +9,7 @@ import hashlib
 import base64
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.header import decode_header, make_header
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet
@@ -210,9 +211,9 @@ def sync_inbox(db: Session, user_id: str) -> dict:
             if msg_id in seen_mids:
                 continue
 
-            sender = parsed.get("From", "")
-            recipients = parsed.get("To", "")
-            subject = parsed.get("Subject", "")
+            sender = _decode_mime_header(parsed.get("From", ""))
+            recipients = _decode_mime_header(parsed.get("To", ""))
+            subject = _decode_mime_header(parsed.get("Subject", ""))
             body = _get_email_body(parsed)
             received_at = parsed.get("Date")
 
@@ -239,18 +240,45 @@ def sync_inbox(db: Session, user_id: str) -> dict:
             pass
 
 
-def _get_email_body(parsed: email_lib.message.Message) -> str:
-    """Extract plain text body from an email message."""
-    if parsed.is_multipart():
-        for part in parsed.walk():
-            ctype = part.get_content_type()
-            if ctype == "text/plain":
-                payload = part.get_payload(decode=True)
-                if payload:
-                    return payload.decode("utf-8", errors="replace")
+def _decode_mime_header(value: str | None) -> str:
+    """Decode RFC 2047 encoded-word headers (e.g. =?UTF-8?Q?...?=)."""
+    if not value:
         return ""
-    payload = parsed.get_payload(decode=True)
-    return payload.decode("utf-8", errors="replace") if payload else ""
+    try:
+        return str(make_header(decode_header(value)))
+    except Exception:
+        return value
+
+
+def _decode_part(part) -> str:
+    payload = part.get_payload(decode=True)
+    if not payload:
+        return ""
+    charset = part.get_content_charset() or "utf-8"
+    try:
+        return payload.decode(charset, errors="replace")
+    except (LookupError, TypeError):
+        return payload.decode("utf-8", errors="replace")
+
+
+def _get_email_body(parsed: email_lib.message.Message) -> str:
+    """Extract the richest body available, preferring HTML over plain text."""
+    if parsed.is_multipart():
+        html_body = ""
+        text_body = ""
+        for part in parsed.walk():
+            if part.get_content_maintype() == "multipart":
+                continue
+            disposition = str(part.get("Content-Disposition", ""))
+            if "attachment" in disposition.lower():
+                continue
+            ctype = part.get_content_type()
+            if ctype == "text/html" and not html_body:
+                html_body = _decode_part(part)
+            elif ctype == "text/plain" and not text_body:
+                text_body = _decode_part(part)
+        return html_body or text_body
+    return _decode_part(parsed)
 
 
 def _parse_email_date(date_str: str) -> datetime | None:
@@ -268,10 +296,12 @@ def _parse_email_date(date_str: str) -> datetime | None:
 
 def list_emails(db: Session, user_id: str, folder: str = "inbox",
                 page: int = 1, per_page: int = 50) -> list:
-    query = db.query(Email).filter(
-        Email.user_id == user_id,
-        Email.folder == folder,
-    )
+    query = db.query(Email).filter(Email.user_id == user_id)
+    if folder == "starred":
+        # "Starred" is a virtual folder spanning all real folders.
+        query = query.filter(Email.is_starred.is_(True))
+    else:
+        query = query.filter(Email.folder == folder)
     total = query.count()
     emails = (
         query.order_by(Email.received_at.desc())
@@ -310,6 +340,55 @@ def mark_email_read(db: Session, email_id: str, user_id: str) -> dict | None:
     return _email_to_dict(email)
 
 
+def set_email_star(db: Session, email_id: str, user_id: str,
+                   starred: bool) -> dict | None:
+    """Star/unstar an email, writing the change back to Gmail when applicable."""
+    email = db.query(Email).filter(
+        Email.id == email_id,
+        Email.user_id == user_id,
+    ).first()
+    if not email:
+        return None
+
+    account = db.query(EmailAccount).filter(
+        EmailAccount.id == email.account_id
+    ).first() if email.account_id else None
+    if account and account.provider == "gmail" and email.message_id:
+        from services.gmail_service import set_star
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            set_star(user, email.message_id, starred)
+
+    email.is_starred = starred
+    db.commit()
+    db.refresh(email)
+    return _email_to_dict(email)
+
+
+def archive_email(db: Session, email_id: str, user_id: str) -> dict | None:
+    """Archive an email (remove from inbox). Updates Gmail when applicable."""
+    email = db.query(Email).filter(
+        Email.id == email_id,
+        Email.user_id == user_id,
+    ).first()
+    if not email:
+        return None
+
+    account = db.query(EmailAccount).filter(
+        EmailAccount.id == email.account_id
+    ).first() if email.account_id else None
+    if account and account.provider == "gmail" and email.message_id:
+        from services.gmail_service import archive_message
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            archive_message(user, email.message_id)
+
+    email.folder = "archive"
+    db.commit()
+    db.refresh(email)
+    return _email_to_dict(email)
+
+
 def delete_email(db: Session, email_id: str, user_id: str) -> bool:
     email = db.query(Email).filter(
         Email.id == email_id,
@@ -317,6 +396,18 @@ def delete_email(db: Session, email_id: str, user_id: str) -> bool:
     ).first()
     if not email:
         return False
+
+    # For Gmail-backed accounts, also move the message to the Gmail trash so it
+    # doesn't get re-imported on the next sync.
+    account = db.query(EmailAccount).filter(
+        EmailAccount.id == email.account_id
+    ).first() if email.account_id else None
+    if account and account.provider == "gmail" and email.message_id:
+        from services.gmail_service import trash_message
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            trash_message(user, email.message_id)
+
     db.delete(email)
     db.commit()
     return True
@@ -351,6 +442,7 @@ def _email_to_dict(email: Email) -> dict:
         "subject": email.subject,
         "body": email.body,
         "is_read": email.is_read,
+        "is_starred": email.is_starred,
         "folder": email.folder,
         "received_at": email.received_at.isoformat() if email.received_at else None,
         "created_at": email.created_at.isoformat() if email.created_at else None,

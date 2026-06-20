@@ -179,6 +179,37 @@ async def mark_email_read(
     return email
 
 
+class StarBody(BaseModel):
+    starred: bool = True
+
+
+@router.patch("/{email_id}/star")
+async def set_email_star(
+    email_id: str,
+    body: StarBody,
+    user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Star or unstar an email (also updates Gmail)."""
+    email = email_service.set_email_star(db, email_id, user.id, body.starred)
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
+    return email
+
+
+@router.patch("/{email_id}/archive")
+async def archive_email(
+    email_id: str,
+    user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Archive an email (remove from inbox; also updates Gmail)."""
+    email = email_service.archive_email(db, email_id, user.id)
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
+    return email
+
+
 @router.delete("/{email_id}")
 async def delete_email(
     email_id: str,
