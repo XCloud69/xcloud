@@ -201,6 +201,7 @@ class Email(Base):
     subject = Column(String(255), nullable=True)
     body = Column(Text, nullable=True)
     is_read = Column(Boolean, default=False)
+    is_starred = Column(Boolean, default=False)
     folder = Column(String(50), default="inbox")
     received_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)

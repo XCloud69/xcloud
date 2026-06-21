@@ -7,6 +7,8 @@ import stat
 import mimetypes
 from datetime import datetime, timezone
 
+from services.dir_config import get_recording_dir
+
 
 def _file_entry(filepath: str, name: str) -> dict:
     """Build metadata dict for a single file or directory."""
@@ -132,3 +134,42 @@ def read_file(path: str, max_size: int = 10 * 1024 * 1024) -> dict:
         result["encoding"] = "base64"
 
     return result
+
+
+def _safe_filename(filename: str) -> str:
+    """Strip any path components and keep a clean basename."""
+    name = os.path.basename(filename.replace("\\", "/")).strip()
+    return name or "recording.webm"
+
+
+def _unique_path(directory: str, filename: str) -> str:
+    """Return a path inside directory that does not collide with an existing file."""
+    base, ext = os.path.splitext(filename)
+    candidate = os.path.join(directory, filename)
+    counter = 1
+    while os.path.exists(candidate):
+        candidate = os.path.join(directory, f"{base} ({counter}){ext}")
+        counter += 1
+    return candidate
+
+
+def save_recording(data: bytes, filename: str) -> dict:
+    """
+    Persist an uploaded meeting recording into ~/Xcloud/recordings.
+    Returns metadata about the saved file.
+    """
+    directory = get_recording_dir()
+    os.makedirs(directory, exist_ok=True)
+
+    safe = _safe_filename(filename)
+    target = _unique_path(directory, safe)
+
+    with open(target, "wb") as f:
+        f.write(data)
+
+    st = os.stat(target)
+    return {
+        "path": os.path.abspath(target),
+        "name": os.path.basename(target),
+        "size": st.st_size,
+    }
