@@ -9,3 +9,6 @@ from . import reminder_service
 from . import notification_service
 from . import google_auth_service
 from . import gmail_service
+from . import google_calendar_service
+from . import google_tasks_service
+from . import agent_service

@@ -14,6 +14,8 @@ from .notification_api import router as notification_router
 from .files_api import router as files_router
 from .meetings_api import router as meetings_router
 from .email_api import router as email_router
+from .agent_api import router as agent_router
+from .calendar_api import router as calendar_router
 from Data.database import init_db
 from services.dir_config import ensure_xcloud_dirs
 from services.recording_watcher import start_recording_watcher
@@ -67,5 +69,7 @@ app.include_router(notification_router, prefix="/notifications", tags=["Notifica
 app.include_router(files_router, prefix="/files", tags=["Files"])
 app.include_router(meetings_router, prefix="/meetings", tags=["Meetings"])
 app.include_router(email_router, prefix="/email", tags=["Email"])
+app.include_router(agent_router, prefix="/llm", tags=["Agent"])
+app.include_router(calendar_router, prefix="/calendar", tags=["Calendar"])
 
 

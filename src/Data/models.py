@@ -69,6 +69,8 @@ class User(Base):
         "EmailAccount", back_populates="user", cascade="all, delete-orphan")
     emails = relationship(
         "Email", back_populates="user", cascade="all, delete-orphan")
+    calendar_events = relationship(
+        "CalendarEvent", back_populates="user", cascade="all, delete-orphan")
 
 
 class Chat(Base):
@@ -124,6 +126,8 @@ class Task(Base):
         Enum(TaskPriority), default=TaskPriority.medium, nullable=False
     )
     due_date = Column(DateTime, nullable=True)
+    google_task_id = Column(String(255), nullable=True)
+    google_task_list_id = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -164,6 +168,23 @@ class Notification(Base):
     created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="notifications")
+
+
+class CalendarEvent(Base):
+    __tablename__ = "calendar_events"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    location = Column(String(512), nullable=True)
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+    google_event_id = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    user = relationship("User", back_populates="calendar_events")
 
 
 class EmailAccount(Base):

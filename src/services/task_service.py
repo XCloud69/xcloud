@@ -13,6 +13,7 @@ def create_task(
     user_id: str,
     title: str,
     description: str | None = None,
+    status: str = "pending",
     priority: str = "medium",
     due_date: datetime | None = None,
 ) -> dict:
@@ -21,6 +22,7 @@ def create_task(
         user_id=user_id,
         title=title,
         description=description,
+        status=TaskStatus(status) if status in ("pending", "in_progress", "completed") else TaskStatus.pending,
         priority=TaskPriority(priority),
         due_date=due_date,
     )
@@ -75,15 +77,44 @@ def update_task(
     if description is not None:
         task.description = description
     if status is not None:
-        task.status = TaskStatus(status)
+        try:
+            task.status = TaskStatus(status)
+        except ValueError:
+            pass
     if priority is not None:
-        task.priority = TaskPriority(priority)
+        try:
+            task.priority = TaskPriority(priority)
+        except ValueError:
+            pass
     if due_date is not None:
         task.due_date = due_date
     task.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(task)
     return _task_to_dict(task)
+
+
+def list_unsynced_tasks(db: Session, user_id: str) -> list:
+    tasks = db.query(Task).filter(
+        Task.user_id == user_id,
+        Task.google_task_id.is_(None),
+    ).all()
+    return [_task_to_dict(t) for t in tasks]
+
+
+def set_google_ids(
+    db: Session,
+    task_id: str,
+    google_task_id: str | None = None,
+    google_task_list_id: str | None = None,
+):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if task:
+        if google_task_id is not None:
+            task.google_task_id = google_task_id
+        if google_task_list_id is not None:
+            task.google_task_list_id = google_task_list_id
+        db.commit()
 
 
 def delete_task(db: Session, task_id: str, user_id: str) -> bool:
@@ -106,6 +137,8 @@ def _task_to_dict(task: Task) -> dict:
         "status": task.status.value if task.status else "pending",
         "priority": task.priority.value if task.priority else "medium",
         "due_date": task.due_date.isoformat() if task.due_date else None,
+        "google_task_id": task.google_task_id,
+        "google_task_list_id": task.google_task_list_id,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
     }
