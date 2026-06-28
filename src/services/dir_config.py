@@ -18,9 +18,6 @@ def ensure_xcloud_dirs() -> None:
 def get_recording_dir() -> str:
     return os.path.join(XDCLOUD_HOME, "recordings")
 
-def get_notes_dir() -> str:
-    return os.path.join(XDCLOUD_HOME, "notes")
-
 def get_transcriptions_dir() -> str:
     return os.path.join(XDCLOUD_HOME, "transcriptions")
 
