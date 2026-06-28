@@ -18,53 +18,6 @@ current_index = None
 current_collection_name = None
 
 
-def create_index_from_folder(folder_path: str,
-                             collection_name: str = "default"):
-    """
-    Create a vector index from documents in a folder.
-    Supports: .txt, .md, .pdf, .docx, etc.
-    """
-    global current_index, current_collection_name
-
-    if not path.exists(folder_path):
-        raise ValueError(f"Folder path does not exist: {folder_path}")
-
-    # Load documents from folder
-    documents = SimpleDirectoryReader(
-        input_dir=folder_path,
-        recursive=True,
-        required_exts=[".txt", ".md", ".pdf"]  # Add more as needed
-    ).load_data()
-
-    if not documents:
-        raise ValueError(f"No supported documents found in {folder_path}")
-
-    try:
-        chroma_client.delete_collection(name=collection_name)
-    except:
-        pass
-
-    chroma_collection = chroma_client.create_collection(name=collection_name)
-
-    # Create vector store
-    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-    storage_context = StorageContext.from_defaults(vector_store=vector_store)
-
-    # Create index with custom embedding model
-    current_index = VectorStoreIndex.from_documents(
-        documents,
-        storage_context=storage_context,
-        embed_model=embed_model,
-        show_progress=True,
-    )
-
-    current_collection_name = collection_name
-
-    return {
-        "status": "success",
-        "documents_indexed": len(documents),
-        "collection": collection_name
-    }
 
 
 class IndexingCancelled(Exception):

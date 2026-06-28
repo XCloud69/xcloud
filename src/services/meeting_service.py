@@ -3,11 +3,9 @@ import datetime
 import jwt
 import requests
 from fastapi import HTTPException
-from .dir_config import get_recording_dir
 
 VIDEOSDK_API_KEY = os.environ.get("VIDEOSDK_API_KEY", "")
 VIDEOSDK_SECRET_KEY = os.environ.get("VIDEOSDK_SECRET_KEY", "")
-RECORDING_DIR = get_recording_dir()
 
 def generate_token() -> str:
     if not VIDEOSDK_API_KEY or not VIDEOSDK_SECRET_KEY:

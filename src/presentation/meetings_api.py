@@ -1,14 +1,7 @@
 from fastapi import APIRouter
-from pydantic import BaseModel
 from services import meeting_service
 
 router = APIRouter()
-
-class RoomRequest(BaseModel):
-    token: str
-
-class RecordingRequest(BaseModel):
-    roomId: str
 
 
 @router.get("/get-token")

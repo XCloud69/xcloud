@@ -1,7 +1,6 @@
-"""Email API — send, receive, and manage emails via IMAP/SMTP."""
+"""Email API — send, receive, and manage emails via Gmail API."""
 
 import asyncio
-import socket
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -9,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from Data.database import get_db, SessionLocal
 from Data.models import User
-from services import auth_service, email_service
+from services import auth_service, gmail_service
 
 router = APIRouter()
 
@@ -43,7 +42,7 @@ async def get_account(
     db: Session = Depends(get_db),
 ):
     """Get the configured email account."""
-    account = email_service.get_account(db, user.id)
+    account = gmail_service.get_account(db, user.id)
     if not account:
         raise HTTPException(status_code=404, detail="No email account configured")
     return account
@@ -56,7 +55,7 @@ async def configure_account(
     db: Session = Depends(get_db),
 ):
     """Create or update email account configuration."""
-    return email_service.save_account(db, user.id, body.model_dump())
+    return gmail_service.save_account(db, user.id, body.model_dump())
 
 
 @router.delete("/account")
@@ -65,7 +64,7 @@ async def remove_account(
     db: Session = Depends(get_db),
 ):
     """Remove the configured email account."""
-    if not email_service.delete_account(db, user.id):
+    if not gmail_service.delete_account(db, user.id):
         raise HTTPException(status_code=404, detail="No email account configured")
     return {"status": "Account removed"}
 
@@ -75,18 +74,18 @@ async def remove_account(
 # ---------------------------------------------------------------------------
 
 
-def _send_email_sync(user_id: str, to: str, subject: str, body: str) -> dict:
+def _send_email_sync(user: User, to: str, subject: str, body: str) -> dict:
     db = SessionLocal()
     try:
-        return email_service.send_email(db, user_id, to, subject, body)
+        return gmail_service.send_email(db, user, to, subject, body)
     finally:
         db.close()
 
 
-def _sync_inbox_sync(user_id: str) -> dict:
+def _sync_inbox_sync(user: User) -> dict:
     db = SessionLocal()
     try:
-        return email_service.sync_inbox(db, user_id)
+        return gmail_service.sync_inbox(db, user)
     finally:
         db.close()
 
@@ -96,44 +95,34 @@ async def send_email(
     body: SendEmailBody,
     user: User = Depends(auth_service.get_current_user),
 ):
-    """Send an email via SMTP."""
+    """Send an email via Gmail API."""
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            None, _send_email_sync, user.id, body.to, body.subject, body.body
+            None, _send_email_sync, user, body.to, body.subject, body.body
         )
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except socket.timeout:
-        raise HTTPException(status_code=504, detail="SMTP connection timed out")
     except Exception as e:
-        msg = str(e)
-        if "Authentication" in msg:
-            raise HTTPException(status_code=401, detail="SMTP authentication failed")
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {msg}")
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {e}")
 
 
 @router.post("/sync")
 async def sync_emails(
     user: User = Depends(auth_service.get_current_user),
 ):
-    """Sync unseen emails from the inbox via IMAP."""
+    """Sync emails from Gmail."""
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            None, _sync_inbox_sync, user.id
+            None, _sync_inbox_sync, user
         )
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except socket.timeout:
-        raise HTTPException(status_code=504, detail="IMAP connection timed out")
     except Exception as e:
-        msg = str(e)
-        if "Authentication" in msg or "LOGIN" in msg:
-            raise HTTPException(status_code=401, detail="IMAP authentication failed")
-        raise HTTPException(status_code=500, detail=f"IMAP sync failed: {msg}")
+        raise HTTPException(status_code=500, detail=f"Gmail sync failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +139,7 @@ async def list_emails(
     db: Session = Depends(get_db),
 ):
     """List emails in a folder, paginated."""
-    return email_service.list_emails(db, user.id, folder=folder, page=page, per_page=per_page)
+    return gmail_service.list_emails(db, user.id, folder=folder, page=page, per_page=per_page)
 
 
 @router.get("/{email_id}")
@@ -160,7 +149,7 @@ async def get_email(
     db: Session = Depends(get_db),
 ):
     """Get a single email by ID."""
-    email = email_service.get_email(db, email_id, user.id)
+    email = gmail_service.get_email(db, email_id, user.id)
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     return email
@@ -173,7 +162,7 @@ async def mark_email_read(
     db: Session = Depends(get_db),
 ):
     """Mark an email as read."""
-    email = email_service.mark_email_read(db, email_id, user.id)
+    email = gmail_service.mark_email_read(db, email_id, user.id)
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     return email
@@ -191,7 +180,7 @@ async def set_email_star(
     db: Session = Depends(get_db),
 ):
     """Star or unstar an email (also updates Gmail)."""
-    email = email_service.set_email_star(db, email_id, user.id, body.starred)
+    email = gmail_service.set_email_star(db, email_id, user.id, body.starred)
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     return email
@@ -204,7 +193,7 @@ async def archive_email(
     db: Session = Depends(get_db),
 ):
     """Archive an email (remove from inbox; also updates Gmail)."""
-    email = email_service.archive_email(db, email_id, user.id)
+    email = gmail_service.archive_email(db, email_id, user.id)
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     return email
@@ -217,6 +206,6 @@ async def delete_email(
     db: Session = Depends(get_db),
 ):
     """Delete an email."""
-    if not email_service.delete_email(db, email_id, user.id):
+    if not gmail_service.delete_email(db, email_id, user.id):
         raise HTTPException(status_code=404, detail="Email not found")
     return {"status": "Email deleted"}

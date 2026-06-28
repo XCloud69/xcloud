@@ -193,55 +193,6 @@ def archive_message(user: User, message_id: str) -> bool:
         return False
 
 
-def refresh_bodies(db: Session, user: User, limit: int = 200) -> dict:
-    """Re-fetch body content for already-synced Gmail emails.
-
-    Older rows may have been stored with only the plain-text part. This
-    re-pulls each message and prefers the HTML body so they render richly.
-    """
-    account = (
-        db.query(EmailAccount)
-        .filter(EmailAccount.user_id == user.id, EmailAccount.provider == "gmail")
-        .first()
-    )
-    if not account:
-        raise ValueError("No Gmail account configured")
-
-    service = _get_gmail_service(user)
-    rows = (
-        db.query(Email)
-        .filter(
-            Email.account_id == account.id,
-            Email.message_id.isnot(None),
-        )
-        .limit(limit)
-        .all()
-    )
-
-    updated = 0
-    for row in rows:
-        # Only refresh rows that don't already hold HTML.
-        if row.body and "<" in row.body and ">" in row.body:
-            continue
-        try:
-            msg = (
-                service.users()
-                .messages()
-                .get(userId="me", id=row.message_id, format="raw")
-                .execute()
-            )
-            parsed = message_from_bytes(base64.urlsafe_b64decode(msg["raw"]))
-            new_body = _get_body(parsed)
-            if new_body and new_body != row.body:
-                row.body = new_body
-                updated += 1
-        except Exception:
-            continue
-
-    db.commit()
-    return {"updated": updated, "checked": len(rows)}
-
-
 def set_star(user: User, message_id: str, starred: bool) -> bool:
     """Add or remove the Gmail STARRED label (requires gmail.modify scope)."""
     if not message_id:
@@ -293,7 +244,6 @@ def _get_body(parsed) -> str:
         for part in parsed.walk():
             if part.get_content_maintype() == "multipart":
                 continue
-            # Skip attachments.
             disposition = str(part.get("Content-Disposition", ""))
             if "attachment" in disposition.lower():
                 continue
@@ -323,7 +273,205 @@ def _email_to_dict(email: Email) -> dict:
         "subject": email.subject,
         "body": email.body,
         "is_read": email.is_read,
+        "is_starred": email.is_starred,
         "folder": email.folder,
         "received_at": email.received_at.isoformat() if email.received_at else None,
         "created_at": email.created_at.isoformat() if email.created_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Account CRUD
+# ---------------------------------------------------------------------------
+
+
+def _account_to_dict(account: EmailAccount) -> dict:
+    return {
+        "id": account.id,
+        "provider": account.provider,
+        "email_address": account.email_address,
+        "smtp_server": account.smtp_server,
+        "smtp_port": account.smtp_port,
+        "smtp_username": account.smtp_username,
+        "imap_server": account.imap_server,
+        "imap_port": account.imap_port,
+        "imap_username": account.imap_username,
+        "created_at": account.created_at.isoformat() if account.created_at else None,
+    }
+
+
+def get_account(db: Session, user_id: str) -> dict | None:
+    account = db.query(EmailAccount).filter(
+        EmailAccount.user_id == user_id
+    ).first()
+    if not account:
+        return None
+    return _account_to_dict(account)
+
+
+def save_account(db: Session, user_id: str, data: dict) -> dict:
+    existing = db.query(EmailAccount).filter(
+        EmailAccount.user_id == user_id
+    ).first()
+
+    if existing:
+        for field in ("provider", "email_address", "smtp_server", "smtp_port",
+                      "imap_server", "imap_port"):
+            if field in data:
+                setattr(existing, field, data[field])
+        if "smtp_username" in data:
+            existing.smtp_username = data["smtp_username"]
+        if "smtp_password" in data:
+            existing.smtp_password = _encrypt(data["smtp_password"])
+        if "imap_username" in data:
+            existing.imap_username = data["imap_username"]
+        if "imap_password" in data:
+            existing.imap_password = _encrypt(data["imap_password"])
+        db.commit()
+        db.refresh(existing)
+        return _account_to_dict(existing)
+
+    account = EmailAccount(
+        user_id=user_id,
+        provider=data.get("provider", "smtp"),
+        email_address=data.get("email_address", ""),
+        smtp_server=data.get("smtp_server", ""),
+        smtp_port=data.get("smtp_port", 587),
+        smtp_username=data.get("smtp_username") or data.get("email_address", ""),
+        smtp_password=_encrypt(data.get("smtp_password", "")),
+        imap_server=data.get("imap_server", ""),
+        imap_port=data.get("imap_port", 993),
+        imap_username=data.get("imap_username") or data.get("email_address", ""),
+        imap_password=_encrypt(data.get("imap_password", "")),
+    )
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return _account_to_dict(account)
+
+
+def delete_account(db: Session, user_id: str) -> bool:
+    account = db.query(EmailAccount).filter(
+        EmailAccount.user_id == user_id
+    ).first()
+    if not account:
+        return False
+    db.delete(account)
+    db.commit()
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Local email CRUD
+# ---------------------------------------------------------------------------
+
+
+def list_emails(db: Session, user_id: str, folder: str = "inbox",
+                page: int = 1, per_page: int = 50) -> list:
+    query = db.query(Email).filter(Email.user_id == user_id)
+    if folder == "starred":
+        query = query.filter(Email.is_starred.is_(True))
+    else:
+        query = query.filter(Email.folder == folder)
+    total = query.count()
+    emails = (
+        query.order_by(Email.received_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+    return {
+        "emails": [_email_to_dict(e) for e in emails],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
+
+
+def get_email(db: Session, email_id: str, user_id: str) -> dict | None:
+    email = db.query(Email).filter(
+        Email.id == email_id,
+        Email.user_id == user_id,
+    ).first()
+    if not email:
+        return None
+    return _email_to_dict(email)
+
+
+def mark_email_read(db: Session, email_id: str, user_id: str) -> dict | None:
+    email = db.query(Email).filter(
+        Email.id == email_id,
+        Email.user_id == user_id,
+    ).first()
+    if not email:
+        return None
+    email.is_read = True
+    db.commit()
+    db.refresh(email)
+    return _email_to_dict(email)
+
+
+def set_email_star(db: Session, email_id: str, user_id: str,
+                   starred: bool) -> dict | None:
+    email = db.query(Email).filter(
+        Email.id == email_id,
+        Email.user_id == user_id,
+    ).first()
+    if not email:
+        return None
+
+    account = db.query(EmailAccount).filter(
+        EmailAccount.id == email.account_id
+    ).first() if email.account_id else None
+    if account and account.provider == "gmail" and email.message_id:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            set_star(user, email.message_id, starred)
+
+    email.is_starred = starred
+    db.commit()
+    db.refresh(email)
+    return _email_to_dict(email)
+
+
+def archive_email(db: Session, email_id: str, user_id: str) -> dict | None:
+    email = db.query(Email).filter(
+        Email.id == email_id,
+        Email.user_id == user_id,
+    ).first()
+    if not email:
+        return None
+
+    account = db.query(EmailAccount).filter(
+        EmailAccount.id == email.account_id
+    ).first() if email.account_id else None
+    if account and account.provider == "gmail" and email.message_id:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            archive_message(user, email.message_id)
+
+    email.folder = "archive"
+    db.commit()
+    db.refresh(email)
+    return _email_to_dict(email)
+
+
+def delete_email(db: Session, email_id: str, user_id: str) -> bool:
+    email = db.query(Email).filter(
+        Email.id == email_id,
+        Email.user_id == user_id,
+    ).first()
+    if not email:
+        return False
+
+    account = db.query(EmailAccount).filter(
+        EmailAccount.id == email.account_id
+    ).first() if email.account_id else None
+    if account and account.provider == "gmail" and email.message_id:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            trash_message(user, email.message_id)
+
+    db.delete(email)
+    db.commit()
+    return True
